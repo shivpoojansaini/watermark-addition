@@ -440,10 +440,48 @@ class EarlyStopping:
         return self.should_stop
 
 
+class WatermarkLoss(nn.Module):
+    """
+    Custom loss for watermark addition that encourages:
+    1. Output matches watermarked target (MSE + L1)
+    2. Output is different from clean input (encourages watermark addition)
+    """
+
+    def __init__(self, lambda_mse=1.0, lambda_l1=0.5, lambda_diff=0.1):
+        super().__init__()
+        self.lambda_mse = lambda_mse
+        self.lambda_l1 = lambda_l1
+        self.lambda_diff = lambda_diff
+        self.mse = nn.MSELoss()
+        self.l1 = nn.L1Loss()
+
+    def forward(self, output, target, clean_input):
+        # Reconstruction loss - match watermarked target
+        mse_loss = self.mse(output, target)
+        l1_loss = self.l1(output, target)
+
+        # Difference encouragement - output should differ from clean input
+        # We want the model to ADD something, not just copy
+        diff_from_input = self.l1(output, clean_input)
+        diff_target = self.l1(target, clean_input)  # How different target is from input
+
+        # Penalty if output is too similar to input compared to target
+        # If diff_from_input < diff_target, we penalize
+        diff_penalty = torch.relu(diff_target - diff_from_input)
+
+        total_loss = (self.lambda_mse * mse_loss +
+                      self.lambda_l1 * l1_loss +
+                      self.lambda_diff * diff_penalty)
+
+        return total_loss, mse_loss, diff_from_input
+
+
 def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch):
     """Train for one epoch."""
     model.train()
     running_loss = 0.0
+    running_mse = 0.0
+    running_diff = 0.0
 
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1} [Train]")
     for clean, watermarked in pbar:
@@ -454,22 +492,27 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch):
 
         # Forward pass
         output = model(clean)
-        loss = criterion(output, watermarked)
+        loss, mse_loss, diff = criterion(output, watermarked, clean)
 
         # Backward pass
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item()
-        pbar.set_postfix({'loss': f'{loss.item():.6f}'})
+        running_mse += mse_loss.item()
+        running_diff += diff.item()
+        pbar.set_postfix({'loss': f'{loss.item():.4f}', 'mse': f'{mse_loss.item():.4f}', 'diff': f'{diff.item():.4f}'})
 
-    return running_loss / len(dataloader)
+    n = len(dataloader)
+    return running_loss / n
 
 
 def validate(model, dataloader, criterion, device, epoch):
     """Validate the model."""
     model.eval()
     running_loss = 0.0
+    running_mse = 0.0
+    running_diff = 0.0
 
     with torch.no_grad():
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1} [Valid]")
@@ -478,12 +521,15 @@ def validate(model, dataloader, criterion, device, epoch):
             watermarked = watermarked.to(device, non_blocking=True)
 
             output = model(clean)
-            loss = criterion(output, watermarked)
+            loss, mse_loss, diff = criterion(output, watermarked, clean)
 
             running_loss += loss.item()
-            pbar.set_postfix({'loss': f'{loss.item():.6f}'})
+            running_mse += mse_loss.item()
+            running_diff += diff.item()
+            pbar.set_postfix({'loss': f'{loss.item():.4f}', 'mse': f'{mse_loss.item():.4f}', 'diff': f'{diff.item():.4f}'})
 
-    return running_loss / len(dataloader)
+    n = len(dataloader)
+    return running_loss / n
 
 
 def train_model(model, train_loader, val_loader, device, args, checkpoint_manager, start_epoch=0):
@@ -500,7 +546,8 @@ def train_model(model, train_loader, val_loader, device, args, checkpoint_manage
     print(f"Learning rate: {args.learning_rate}")
     print("="*60 + "\n")
 
-    criterion = nn.MSELoss()
+    # Custom loss that encourages watermark addition
+    criterion = WatermarkLoss(lambda_mse=1.0, lambda_l1=0.5, lambda_diff=0.2)
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     early_stopping = EarlyStopping(patience=args.patience)
