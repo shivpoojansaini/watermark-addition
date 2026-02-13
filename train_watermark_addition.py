@@ -42,9 +42,9 @@ def train_test_split_simple(X, y, train_size=0.8, random_state=42):
 # Configuration
 # ============================================================================
 
-DEFAULT_WIDTH = 512
-DEFAULT_HEIGHT = 512
-DEFAULT_BATCH_SIZE = 16
+DEFAULT_WIDTH = 1024
+DEFAULT_HEIGHT = 1024
+DEFAULT_BATCH_SIZE = 4  # Reduced for larger images (increase if GPU has more memory)
 DEFAULT_EPOCHS = 100
 DEFAULT_LEARNING_RATE = 0.0005
 DEFAULT_CHECKPOINT_DIR = './checkpoints'
@@ -149,55 +149,115 @@ class ConvBlock(nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
+class DoubleConvBlock(nn.Module):
+    """Two consecutive conv blocks for better feature extraction."""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
 class WatermarkAutoencoder(nn.Module):
     """
-    Convolutional Autoencoder for watermark addition.
+    Deep Convolutional Autoencoder with Skip Connections (U-Net style) for watermark addition.
 
-    Architecture:
-        Encoder: Conv -> MaxPool -> BN (x3)
-        Decoder: Conv -> Upsample (x3)
+    Architecture (for 1024x1024 input):
+        Encoder: 1024 -> 512 -> 256 -> 128 -> 64 (spatial dimensions)
+        Channels: 3 -> 64 -> 128 -> 256 -> 512 -> 512 (bottleneck)
+        Decoder: 64 -> 128 -> 256 -> 512 -> 1024 (spatial dimensions)
+        Skip connections for better detail preservation
     """
 
     def __init__(self):
         super().__init__()
 
-        # Encoder
-        self.enc1 = ConvBlock(3, 64)
+        # Encoder path
+        # Level 1: 1024x1024 -> 512x512
+        self.enc1 = DoubleConvBlock(3, 64)
         self.pool1 = nn.MaxPool2d(2, 2)
 
-        self.enc2 = ConvBlock(64, 32)
+        # Level 2: 512x512 -> 256x256
+        self.enc2 = DoubleConvBlock(64, 128)
         self.pool2 = nn.MaxPool2d(2, 2)
 
-        self.enc3 = ConvBlock(32, 16)
+        # Level 3: 256x256 -> 128x128
+        self.enc3 = DoubleConvBlock(128, 256)
         self.pool3 = nn.MaxPool2d(2, 2)
 
-        # Decoder
-        self.dec1 = ConvBlock(16, 64)
-        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        # Level 4: 128x128 -> 64x64
+        self.enc4 = DoubleConvBlock(256, 512)
+        self.pool4 = nn.MaxPool2d(2, 2)
 
-        self.dec2 = ConvBlock(64, 32)
-        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        # Bottleneck: 64x64
+        self.bottleneck = DoubleConvBlock(512, 512)
 
-        self.dec3 = ConvBlock(32, 16)
-        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        # Decoder path with skip connections
+        # Level 4: 64x64 -> 128x128
+        self.up4 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
+        self.dec4 = DoubleConvBlock(512 + 512, 512)  # concat with enc4
 
-        # Output
-        self.output = nn.Conv2d(16, 3, kernel_size=3, padding=1)
+        # Level 3: 128x128 -> 256x256
+        self.up3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec3 = DoubleConvBlock(256 + 256, 256)  # concat with enc3
+
+        # Level 2: 256x256 -> 512x512
+        self.up2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec2 = DoubleConvBlock(128 + 128, 128)  # concat with enc2
+
+        # Level 1: 512x512 -> 1024x1024
+        self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = DoubleConvBlock(64 + 64, 64)  # concat with enc1
+
+        # Output layer
+        self.output = nn.Conv2d(64, 3, kernel_size=1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         # Encoder
-        e1 = self.pool1(self.enc1(x))
-        e2 = self.pool2(self.enc2(e1))
-        e3 = self.pool3(self.enc3(e2))
+        e1 = self.enc1(x)      # 1024x1024, 64 channels
+        p1 = self.pool1(e1)    # 512x512
 
-        # Decoder
-        d1 = self.up1(self.dec1(e3))
-        d2 = self.up2(self.dec2(d1))
-        d3 = self.up3(self.dec3(d2))
+        e2 = self.enc2(p1)     # 512x512, 128 channels
+        p2 = self.pool2(e2)    # 256x256
+
+        e3 = self.enc3(p2)     # 256x256, 256 channels
+        p3 = self.pool3(e3)    # 128x128
+
+        e4 = self.enc4(p3)     # 128x128, 512 channels
+        p4 = self.pool4(e4)    # 64x64
+
+        # Bottleneck
+        b = self.bottleneck(p4)  # 64x64, 512 channels
+
+        # Decoder with skip connections
+        d4 = self.up4(b)                        # 128x128
+        d4 = torch.cat([d4, e4], dim=1)         # concat with encoder
+        d4 = self.dec4(d4)                      # 128x128, 512 channels
+
+        d3 = self.up3(d4)                       # 256x256
+        d3 = torch.cat([d3, e3], dim=1)         # concat with encoder
+        d3 = self.dec3(d3)                      # 256x256, 256 channels
+
+        d2 = self.up2(d3)                       # 512x512
+        d2 = torch.cat([d2, e2], dim=1)         # concat with encoder
+        d2 = self.dec2(d2)                      # 512x512, 128 channels
+
+        d1 = self.up1(d2)                       # 1024x1024
+        d1 = torch.cat([d1, e1], dim=1)         # concat with encoder
+        d1 = self.dec1(d1)                      # 1024x1024, 64 channels
 
         # Output
-        out = self.sigmoid(self.output(d3))
+        out = self.sigmoid(self.output(d1))
 
         return out
 

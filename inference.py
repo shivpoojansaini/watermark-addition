@@ -31,40 +31,100 @@ class ConvBlock(nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
+class DoubleConvBlock(nn.Module):
+    """Two consecutive conv blocks for better feature extraction."""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
 class WatermarkAutoencoder(nn.Module):
+    """
+    Deep Convolutional Autoencoder with Skip Connections (U-Net style).
+    """
+
     def __init__(self):
         super().__init__()
 
-        # Encoder
-        self.enc1 = ConvBlock(3, 64)
+        # Encoder path
+        self.enc1 = DoubleConvBlock(3, 64)
         self.pool1 = nn.MaxPool2d(2, 2)
-        self.enc2 = ConvBlock(64, 32)
+
+        self.enc2 = DoubleConvBlock(64, 128)
         self.pool2 = nn.MaxPool2d(2, 2)
-        self.enc3 = ConvBlock(32, 16)
+
+        self.enc3 = DoubleConvBlock(128, 256)
         self.pool3 = nn.MaxPool2d(2, 2)
 
-        # Decoder
-        self.dec1 = ConvBlock(16, 64)
-        self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.dec2 = ConvBlock(64, 32)
-        self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.dec3 = ConvBlock(32, 16)
-        self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.enc4 = DoubleConvBlock(256, 512)
+        self.pool4 = nn.MaxPool2d(2, 2)
 
-        # Output
-        self.output = nn.Conv2d(16, 3, kernel_size=3, padding=1)
+        # Bottleneck
+        self.bottleneck = DoubleConvBlock(512, 512)
+
+        # Decoder path with skip connections
+        self.up4 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
+        self.dec4 = DoubleConvBlock(512 + 512, 512)
+
+        self.up3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec3 = DoubleConvBlock(256 + 256, 256)
+
+        self.up2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec2 = DoubleConvBlock(128 + 128, 128)
+
+        self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = DoubleConvBlock(64 + 64, 64)
+
+        # Output layer
+        self.output = nn.Conv2d(64, 3, kernel_size=1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        e1 = self.pool1(self.enc1(x))
-        e2 = self.pool2(self.enc2(e1))
-        e3 = self.pool3(self.enc3(e2))
+        # Encoder
+        e1 = self.enc1(x)
+        p1 = self.pool1(e1)
 
-        d1 = self.up1(self.dec1(e3))
-        d2 = self.up2(self.dec2(d1))
-        d3 = self.up3(self.dec3(d2))
+        e2 = self.enc2(p1)
+        p2 = self.pool2(e2)
 
-        return self.sigmoid(self.output(d3))
+        e3 = self.enc3(p2)
+        p3 = self.pool3(e3)
+
+        e4 = self.enc4(p3)
+        p4 = self.pool4(e4)
+
+        # Bottleneck
+        b = self.bottleneck(p4)
+
+        # Decoder with skip connections
+        d4 = self.up4(b)
+        d4 = torch.cat([d4, e4], dim=1)
+        d4 = self.dec4(d4)
+
+        d3 = self.up3(d4)
+        d3 = torch.cat([d3, e3], dim=1)
+        d3 = self.dec3(d3)
+
+        d2 = self.up2(d3)
+        d2 = torch.cat([d2, e2], dim=1)
+        d2 = self.dec2(d2)
+
+        d1 = self.up1(d2)
+        d1 = torch.cat([d1, e1], dim=1)
+        d1 = self.dec1(d1)
+
+        return self.sigmoid(self.output(d1))
 
 
 # ============================================================================
@@ -90,7 +150,7 @@ def load_model(model_path, device):
     return model
 
 
-def add_watermark(image_path, model, device, width=512, height=512):
+def add_watermark(image_path, model, device, width=1024, height=1024):
     """
     Add watermark to a single image.
 
@@ -135,17 +195,17 @@ def add_watermark(image_path, model, device, width=512, height=512):
     return watermarked_original_size
 
 
-def process_single_image(input_path, output_path, model, device):
+def process_single_image(input_path, output_path, model, device, width=1024, height=1024):
     """Process a single image."""
     print(f"Processing: {input_path}")
 
-    watermarked = add_watermark(input_path, model, device)
+    watermarked = add_watermark(input_path, model, device, width, height)
     cv2.imwrite(str(output_path), watermarked)
 
     print(f"Saved: {output_path}")
 
 
-def process_directory(input_dir, output_dir, model, device):
+def process_directory(input_dir, output_dir, model, device, width=1024, height=1024):
     """Process all images in a directory."""
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -159,7 +219,7 @@ def process_directory(input_dir, output_dir, model, device):
     for img_path in image_files:
         output_path = output_dir / f"watermarked_{img_path.name}"
         try:
-            process_single_image(img_path, output_path, model, device)
+            process_single_image(img_path, output_path, model, device, width, height)
         except Exception as e:
             print(f"Error processing {img_path}: {e}")
 
@@ -174,10 +234,10 @@ def main():
                         help='Input image path or directory')
     parser.add_argument('--output', type=str, required=True,
                         help='Output image path or directory')
-    parser.add_argument('--width', type=int, default=512,
-                        help='Model input width (default: 512)')
-    parser.add_argument('--height', type=int, default=512,
-                        help='Model input height (default: 512)')
+    parser.add_argument('--width', type=int, default=1024,
+                        help='Model input width (default: 1024)')
+    parser.add_argument('--height', type=int, default=1024,
+                        help='Model input height (default: 1024)')
 
     args = parser.parse_args()
 
@@ -197,10 +257,10 @@ def main():
 
     if input_path.is_file():
         # Single image
-        process_single_image(input_path, args.output, model, device)
+        process_single_image(input_path, args.output, model, device, args.width, args.height)
     elif input_path.is_dir():
         # Directory of images
-        process_directory(input_path, args.output, model, device)
+        process_directory(input_path, args.output, model, device, args.width, args.height)
     else:
         print(f"Error: {args.input} is not a valid file or directory")
 
