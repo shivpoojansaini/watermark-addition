@@ -2,7 +2,6 @@
 numpy>=1.21.0
 matplotlib>=3.5.0
 opencv-python>=4.5.0
-scikit-learn>=1.0.0
 tqdm>=4.64.0
 
 # PyTorch with CUDA support (for NVIDIA GPU)

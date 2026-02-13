@@ -25,6 +25,19 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 
+def train_test_split_simple(X, y, train_size=0.8, random_state=42):
+    """Simple train/test split without sklearn dependency."""
+    np.random.seed(random_state)
+    n_samples = len(X)
+    indices = np.random.permutation(n_samples)
+    train_size = int(n_samples * train_size)
+
+    train_idx = indices[:train_size]
+    test_idx = indices[train_size:]
+
+    return X[train_idx], X[test_idx], y[train_idx], y[test_idx]
+
+
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -636,8 +649,7 @@ def main():
     X, y = load_dataset(args.data_root, args.width, args.height)
 
     # Split into train/val
-    from sklearn.model_selection import train_test_split
-    X_train, X_val, y_train, y_val = train_test_split(X, y, train_size=0.8, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split_simple(X, y, train_size=0.8, random_state=42)
     print(f"\nTrain: {len(X_train)}, Validation: {len(X_val)}")
 
     # Create datasets
