@@ -150,7 +150,7 @@ def load_model(model_path, device):
     return model
 
 
-def add_watermark(image_path, model, device, width=1024, height=1024):
+def add_watermark(image_path, model, device, width=512, height=512):
     """
     Add watermark to a single image.
 
@@ -195,7 +195,7 @@ def add_watermark(image_path, model, device, width=1024, height=1024):
     return watermarked_original_size
 
 
-def process_single_image(input_path, output_path, model, device, width=1024, height=1024):
+def process_single_image(input_path, output_path, model, device, width=512, height=512):
     """Process a single image."""
     print(f"Processing: {input_path}")
 
@@ -205,7 +205,7 @@ def process_single_image(input_path, output_path, model, device, width=1024, hei
     print(f"Saved: {output_path}")
 
 
-def process_directory(input_dir, output_dir, model, device, width=1024, height=1024):
+def process_directory(input_dir, output_dir, model, device, width=512, height=512):
     """Process all images in a directory."""
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -234,10 +234,10 @@ def main():
                         help='Input image path or directory')
     parser.add_argument('--output', type=str, required=True,
                         help='Output image path or directory')
-    parser.add_argument('--width', type=int, default=1024,
-                        help='Model input width (default: 1024)')
-    parser.add_argument('--height', type=int, default=1024,
-                        help='Model input height (default: 1024)')
+    parser.add_argument('--width', type=int, default=512,
+                        help='Model input width (default: 512, use same as training)')
+    parser.add_argument('--height', type=int, default=512,
+                        help='Model input height (default: 512, use same as training)')
 
     args = parser.parse_args()
 
