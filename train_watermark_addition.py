@@ -270,28 +270,24 @@ def take_filename(filedir):
     return os.path.basename(filedir)
 
 
+def get_name_without_ext(filename):
+    """Get filename without extension for flexible matching."""
+    return os.path.splitext(filename)[0].lower()
+
+
 def match_filenames(watermarkedarr, nonwatermarkedarr, dname_wm, dname_nwm):
-    """Match watermarked and non-watermarked images by filename."""
+    """Match watermarked and non-watermarked images by filename (ignoring extension)."""
     sortedwmarr = []
     sortednwmarr = []
 
-    wmarr = list(watermarkedarr)
-    nwmarr = list(nonwatermarkedarr)
+    # Create dict mapping name (without ext) -> full filename for non-watermarked
+    nwm_dict = {get_name_without_ext(f): f for f in nonwatermarkedarr}
 
-    length = max(len(watermarkedarr), len(nonwatermarkedarr))
-
-    for pos in range(length):
-        try:
-            if length == len(watermarkedarr):
-                exist_nwm = nwmarr.index(wmarr[pos])
-                sortedwmarr.append(dname_wm + watermarkedarr[pos])
-                sortednwmarr.append(dname_nwm + nonwatermarkedarr[exist_nwm])
-            elif length == len(nonwatermarkedarr):
-                exist_wm = wmarr.index(nwmarr[pos])
-                sortedwmarr.append(dname_wm + watermarkedarr[exist_wm])
-                sortednwmarr.append(dname_nwm + nonwatermarkedarr[pos])
-        except ValueError:
-            continue
+    for wm_file in watermarkedarr:
+        wm_name = get_name_without_ext(wm_file)
+        if wm_name in nwm_dict:
+            sortedwmarr.append(dname_wm + wm_file)
+            sortednwmarr.append(dname_nwm + nwm_dict[wm_name])
 
     return np.array(sortedwmarr), np.array(sortednwmarr)
 
