@@ -171,93 +171,92 @@ class WatermarkAutoencoder(nn.Module):
     """
     Deep Convolutional Autoencoder with Skip Connections (U-Net style) for watermark addition.
 
-    Architecture (for 1024x1024 input):
-        Encoder: 1024 -> 512 -> 256 -> 128 -> 64 (spatial dimensions)
-        Channels: 3 -> 64 -> 128 -> 256 -> 512 -> 512 (bottleneck)
-        Decoder: 64 -> 128 -> 256 -> 512 -> 1024 (spatial dimensions)
-        Skip connections for better detail preservation
+    Uses RESIDUAL LEARNING: model predicts the watermark overlay (difference),
+    then adds it to the input image. This forces the model to learn WHAT to add
+    rather than reconstructing the whole image.
+
+    Formula: output = input + model(input) * scale_factor
     """
 
-    def __init__(self):
+    def __init__(self, residual_scale=0.3):
         super().__init__()
 
+        self.residual_scale = residual_scale  # Scale factor for the watermark overlay
+
         # Encoder path
-        # Level 1: 1024x1024 -> 512x512
         self.enc1 = DoubleConvBlock(3, 64)
         self.pool1 = nn.MaxPool2d(2, 2)
 
-        # Level 2: 512x512 -> 256x256
         self.enc2 = DoubleConvBlock(64, 128)
         self.pool2 = nn.MaxPool2d(2, 2)
 
-        # Level 3: 256x256 -> 128x128
         self.enc3 = DoubleConvBlock(128, 256)
         self.pool3 = nn.MaxPool2d(2, 2)
 
-        # Level 4: 128x128 -> 64x64
         self.enc4 = DoubleConvBlock(256, 512)
         self.pool4 = nn.MaxPool2d(2, 2)
 
-        # Bottleneck: 64x64
+        # Bottleneck
         self.bottleneck = DoubleConvBlock(512, 512)
 
         # Decoder path with skip connections
-        # Level 4: 64x64 -> 128x128
         self.up4 = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.dec4 = DoubleConvBlock(512 + 512, 512)  # concat with enc4
+        self.dec4 = DoubleConvBlock(512 + 512, 512)
 
-        # Level 3: 128x128 -> 256x256
         self.up3 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
-        self.dec3 = DoubleConvBlock(256 + 256, 256)  # concat with enc3
+        self.dec3 = DoubleConvBlock(256 + 256, 256)
 
-        # Level 2: 256x256 -> 512x512
         self.up2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
-        self.dec2 = DoubleConvBlock(128 + 128, 128)  # concat with enc2
+        self.dec2 = DoubleConvBlock(128 + 128, 128)
 
-        # Level 1: 512x512 -> 1024x1024
         self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
-        self.dec1 = DoubleConvBlock(64 + 64, 64)  # concat with enc1
+        self.dec1 = DoubleConvBlock(64 + 64, 64)
 
-        # Output layer
+        # Output layer - predicts the RESIDUAL (watermark overlay)
+        # Using tanh to allow both positive and negative changes
         self.output = nn.Conv2d(64, 3, kernel_size=1)
-        self.sigmoid = nn.Sigmoid()
+        self.tanh = nn.Tanh()
 
     def forward(self, x):
         # Encoder
-        e1 = self.enc1(x)      # 1024x1024, 64 channels
-        p1 = self.pool1(e1)    # 512x512
+        e1 = self.enc1(x)
+        p1 = self.pool1(e1)
 
-        e2 = self.enc2(p1)     # 512x512, 128 channels
-        p2 = self.pool2(e2)    # 256x256
+        e2 = self.enc2(p1)
+        p2 = self.pool2(e2)
 
-        e3 = self.enc3(p2)     # 256x256, 256 channels
-        p3 = self.pool3(e3)    # 128x128
+        e3 = self.enc3(p2)
+        p3 = self.pool3(e3)
 
-        e4 = self.enc4(p3)     # 128x128, 512 channels
-        p4 = self.pool4(e4)    # 64x64
+        e4 = self.enc4(p3)
+        p4 = self.pool4(e4)
 
         # Bottleneck
-        b = self.bottleneck(p4)  # 64x64, 512 channels
+        b = self.bottleneck(p4)
 
         # Decoder with skip connections
-        d4 = self.up4(b)                        # 128x128
-        d4 = torch.cat([d4, e4], dim=1)         # concat with encoder
-        d4 = self.dec4(d4)                      # 128x128, 512 channels
+        d4 = self.up4(b)
+        d4 = torch.cat([d4, e4], dim=1)
+        d4 = self.dec4(d4)
 
-        d3 = self.up3(d4)                       # 256x256
-        d3 = torch.cat([d3, e3], dim=1)         # concat with encoder
-        d3 = self.dec3(d3)                      # 256x256, 256 channels
+        d3 = self.up3(d4)
+        d3 = torch.cat([d3, e3], dim=1)
+        d3 = self.dec3(d3)
 
-        d2 = self.up2(d3)                       # 512x512
-        d2 = torch.cat([d2, e2], dim=1)         # concat with encoder
-        d2 = self.dec2(d2)                      # 512x512, 128 channels
+        d2 = self.up2(d3)
+        d2 = torch.cat([d2, e2], dim=1)
+        d2 = self.dec2(d2)
 
-        d1 = self.up1(d2)                       # 1024x1024
-        d1 = torch.cat([d1, e1], dim=1)         # concat with encoder
-        d1 = self.dec1(d1)                      # 1024x1024, 64 channels
+        d1 = self.up1(d2)
+        d1 = torch.cat([d1, e1], dim=1)
+        d1 = self.dec1(d1)
 
-        # Output
-        out = self.sigmoid(self.output(d1))
+        # RESIDUAL LEARNING: Predict watermark overlay and add to input
+        # tanh gives values in [-1, 1], scale it down
+        residual = self.tanh(self.output(d1)) * self.residual_scale
+
+        # Add residual (watermark) to input and clamp to valid range
+        out = torch.clamp(x + residual, 0, 1)
 
         return out
 

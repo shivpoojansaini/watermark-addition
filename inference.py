@@ -51,11 +51,14 @@ class DoubleConvBlock(nn.Module):
 
 class WatermarkAutoencoder(nn.Module):
     """
-    Deep Convolutional Autoencoder with Skip Connections (U-Net style).
+    Deep U-Net with RESIDUAL LEARNING for watermark addition.
+    Model predicts watermark overlay, adds to input.
     """
 
-    def __init__(self):
+    def __init__(self, residual_scale=0.3):
         super().__init__()
+
+        self.residual_scale = residual_scale
 
         # Encoder path
         self.enc1 = DoubleConvBlock(3, 64)
@@ -86,9 +89,9 @@ class WatermarkAutoencoder(nn.Module):
         self.up1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec1 = DoubleConvBlock(64 + 64, 64)
 
-        # Output layer
+        # Output layer - predicts residual
         self.output = nn.Conv2d(64, 3, kernel_size=1)
-        self.sigmoid = nn.Sigmoid()
+        self.tanh = nn.Tanh()
 
     def forward(self, x):
         # Encoder
@@ -124,7 +127,11 @@ class WatermarkAutoencoder(nn.Module):
         d1 = torch.cat([d1, e1], dim=1)
         d1 = self.dec1(d1)
 
-        return self.sigmoid(self.output(d1))
+        # RESIDUAL: predict watermark overlay and add to input
+        residual = self.tanh(self.output(d1)) * self.residual_scale
+        out = torch.clamp(x + residual, 0, 1)
+
+        return out
 
 
 # ============================================================================
