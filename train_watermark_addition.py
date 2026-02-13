@@ -178,8 +178,7 @@ class WatermarkAutoencoder(nn.Module):
         self.dec2 = ConvBlock(64, 32)
         self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
-        self.dec3 = nn.Conv2d(32, 16, kernel_size=3, padding=0)
-        self.relu3 = nn.ReLU(inplace=True)
+        self.dec3 = ConvBlock(32, 16)
         self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
         # Output
@@ -195,7 +194,7 @@ class WatermarkAutoencoder(nn.Module):
         # Decoder
         d1 = self.up1(self.dec1(e3))
         d2 = self.up2(self.dec2(d1))
-        d3 = self.up3(self.relu3(self.dec3(d2)))
+        d3 = self.up3(self.dec3(d2))
 
         # Output
         out = self.sigmoid(self.output(d3))
