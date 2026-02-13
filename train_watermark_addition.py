@@ -106,11 +106,11 @@ class WatermarkDataset(Dataset):
         if self.augment and random.random() > 0.5:
             clean, watermarked = self._augment(clean, watermarked)
 
-        # Convert BGR to RGB and HWC to CHW
-        clean = np.transpose(clean[:, :, ::-1], (2, 0, 1))
-        watermarked = np.transpose(watermarked[:, :, ::-1], (2, 0, 1))
+        # Convert BGR to RGB and HWC to CHW (use ascontiguousarray to fix negative strides)
+        clean = np.ascontiguousarray(np.transpose(clean[:, :, ::-1], (2, 0, 1)))
+        watermarked = np.ascontiguousarray(np.transpose(watermarked[:, :, ::-1], (2, 0, 1)))
 
-        return torch.tensor(clean), torch.tensor(watermarked)
+        return torch.from_numpy(clean), torch.from_numpy(watermarked)
 
     def _augment(self, clean, watermarked):
         """Apply random augmentation to both images."""
