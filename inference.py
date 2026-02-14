@@ -55,10 +55,10 @@ class WatermarkAutoencoder(nn.Module):
     Model predicts watermark overlay, adds to input.
     """
 
-    def __init__(self, residual_scale=0.3):
+    def __init__(self, residual_scale=0.5):
         super().__init__()
 
-        self.residual_scale = residual_scale
+        self.residual_scale = residual_scale  # Must match training
 
         # Encoder path
         self.enc1 = DoubleConvBlock(3, 64)
@@ -139,21 +139,29 @@ class WatermarkAutoencoder(nn.Module):
 # ============================================================================
 
 def load_model(model_path, device):
-    """Load trained model from checkpoint."""
-    model = WatermarkAutoencoder().to(device)
+    """Load trained model from checkpoint or full model file."""
+    # Load checkpoint/model
+    loaded = torch.load(model_path, map_location=device, weights_only=False)
 
-    # Load checkpoint
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-
-    # Handle both full checkpoint and state_dict only
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+    # Check if it's a full model or just weights/checkpoint
+    if isinstance(loaded, nn.Module):
+        # Full model saved with torch.save(model, path)
+        model = loaded.to(device)
+        print(f"Loaded full model from: {model_path}")
+    elif isinstance(loaded, dict):
+        # Checkpoint or state_dict
+        model = WatermarkAutoencoder().to(device)
+        if 'model_state_dict' in loaded:
+            model.load_state_dict(loaded['model_state_dict'])
+            print(f"Loaded checkpoint from epoch {loaded.get('epoch', 'unknown')}")
+        else:
+            model.load_state_dict(loaded)
+            print(f"Loaded state_dict from: {model_path}")
     else:
-        model.load_state_dict(checkpoint)
+        raise ValueError(f"Unknown model format in {model_path}")
 
     model.eval()
-    print(f"Model loaded from: {model_path}")
+    print(f"Model architecture:\n{model}\n")
     return model
 
 

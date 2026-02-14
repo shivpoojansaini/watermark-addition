@@ -178,10 +178,10 @@ class WatermarkAutoencoder(nn.Module):
     Formula: output = input + model(input) * scale_factor
     """
 
-    def __init__(self, residual_scale=0.3):
+    def __init__(self, residual_scale=0.5):
         super().__init__()
 
-        self.residual_scale = residual_scale  # Scale factor for the watermark overlay
+        self.residual_scale = residual_scale  # Scale factor for the watermark overlay (increased for visibility)
 
         # Encoder path
         self.enc1 = DoubleConvBlock(3, 64)
@@ -440,13 +440,15 @@ class WatermarkLoss(nn.Module):
     Custom loss for watermark addition that encourages:
     1. Output matches watermarked target (MSE + L1)
     2. Output is different from clean input (encourages watermark addition)
+    3. Minimum difference from input (forces visible changes)
     """
 
-    def __init__(self, lambda_mse=1.0, lambda_l1=0.5, lambda_diff=0.1):
+    def __init__(self, lambda_mse=1.0, lambda_l1=0.5, lambda_diff=0.5, min_diff=0.01):
         super().__init__()
         self.lambda_mse = lambda_mse
         self.lambda_l1 = lambda_l1
         self.lambda_diff = lambda_diff
+        self.min_diff = min_diff  # Minimum required difference from input
         self.mse = nn.MSELoss()
         self.l1 = nn.L1Loss()
 
@@ -464,9 +466,14 @@ class WatermarkLoss(nn.Module):
         # If diff_from_input < diff_target, we penalize
         diff_penalty = torch.relu(diff_target - diff_from_input)
 
+        # Additional penalty if output is too similar to input (below minimum threshold)
+        # This forces the model to make visible changes
+        min_diff_penalty = torch.relu(self.min_diff - diff_from_input)
+
         total_loss = (self.lambda_mse * mse_loss +
                       self.lambda_l1 * l1_loss +
-                      self.lambda_diff * diff_penalty)
+                      self.lambda_diff * diff_penalty +
+                      self.lambda_diff * min_diff_penalty)
 
         return total_loss, mse_loss, diff_from_input
 
@@ -542,7 +549,7 @@ def train_model(model, train_loader, val_loader, device, args, checkpoint_manage
     print("="*60 + "\n")
 
     # Custom loss that encourages watermark addition
-    criterion = WatermarkLoss(lambda_mse=1.0, lambda_l1=0.5, lambda_diff=0.2)
+    criterion = WatermarkLoss(lambda_mse=1.0, lambda_l1=0.5, lambda_diff=1.0, min_diff=0.02)
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     early_stopping = EarlyStopping(patience=args.patience)
@@ -779,6 +786,11 @@ def main():
     # Create model
     model = WatermarkAutoencoder().to(device)
     print(f"\nModel parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print("\n" + "="*60)
+    print("MODEL ARCHITECTURE")
+    print("="*60)
+    print(model)
+    print("="*60 + "\n")
 
     # Checkpoint manager
     checkpoint_manager = CheckpointManager(args.checkpoint_dir)
@@ -795,9 +807,10 @@ def main():
     # Load best model for final evaluation
     checkpoint_manager.load_checkpoint(model, checkpoint_path=checkpoint_manager.checkpoint_dir / 'watermark_addition_best.pth')
 
-    # Save final model (just weights)
-    torch.save(model.state_dict(), args.output_model)
+    # Save final model (entire model, not just weights)
+    torch.save(model, args.output_model)
     print(f"\nFinal model saved to: {args.output_model}")
+    print("(Full model saved - load with: model = torch.load('model.pth'))")
 
     # Plot results
     if not args.no_plots:
