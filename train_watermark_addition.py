@@ -306,9 +306,17 @@ def create_pixel_array(files, width, height):
     return np.array(data)
 
 
-def load_dataset(data_root, width, height):
-    """Load and prepare the dataset."""
+def load_dataset(data_root, width, height, max_images=None):
+    """Load and prepare the dataset.
+
+    Args:
+        data_root: Root directory containing train/watermark and train/no-watermark
+        width, height: Image dimensions
+        max_images: Maximum number of images to use (None = use all)
+    """
     print(f"\nLoading dataset from: {data_root}")
+    if max_images:
+        print(f"Limiting to {max_images} images")
 
     # Training paths
     train_path_wm = f'{data_root}/train/watermark/'
@@ -338,6 +346,15 @@ def load_dataset(data_root, width, height):
     )
 
     print(f"Matched {len(tp_wm_sorted)} training pairs")
+
+    # Limit number of images if specified
+    if max_images and len(tp_wm_sorted) > max_images:
+        print(f"Limiting to {max_images} images (from {len(tp_wm_sorted)})")
+        # Randomly select images
+        indices = np.random.permutation(len(tp_wm_sorted))[:max_images]
+        tp_wm_sorted = tp_wm_sorted[indices]
+        tp_nwm_sorted = tp_nwm_sorted[indices]
+        print(f"Using {len(tp_wm_sorted)} training pairs")
 
     # Load pixel values
     print("\nLoading training images...")
@@ -739,6 +756,8 @@ def main():
                         help='Disable plotting')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of data loading workers')
+    parser.add_argument('--max_images', type=int, default=None,
+                        help='Maximum number of images to use for training (default: use all)')
     parser.add_argument('--output_model', type=str, default='watermark_addition_model.pth',
                         help='Output model filename')
 
@@ -754,7 +773,7 @@ def main():
         return
 
     # Load dataset
-    X, y = load_dataset(args.data_root, args.width, args.height)
+    X, y = load_dataset(args.data_root, args.width, args.height, args.max_images)
 
     # Split into train/val
     X_train, X_val, y_train, y_val = train_test_split_simple(X, y, train_size=0.8, random_state=42)
