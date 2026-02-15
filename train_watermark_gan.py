@@ -892,6 +892,10 @@ def main():
     parser.add_argument('--freeze_encoder_epochs', type=int, default=10,
                         help='Epochs to train with frozen encoder')
     
+    # Dataset limiting
+    parser.add_argument('--max_pairs', type=int, default=None,
+                        help='Maximum number of image pairs to use (default: use all)')
+    
     # Output
     parser.add_argument('--output_dir', type=str, default='./output_gan')
     parser.add_argument('--checkpoint_path', type=str, default='watermark_gan.pth')
@@ -927,6 +931,12 @@ def main():
         size=(args.image_size, args.image_size),
         augment=True
     )
+    
+    # Limit number of pairs if specified
+    if args.max_pairs and args.max_pairs < len(full_dataset):
+        print(f"Limiting dataset from {len(full_dataset)} to {args.max_pairs} pairs")
+        indices = torch.randperm(len(full_dataset))[:args.max_pairs].tolist()
+        full_dataset = torch.utils.data.Subset(full_dataset, indices)
     
     # Split
     train_size = int(0.9 * len(full_dataset))

@@ -31,6 +31,8 @@ def main():
     parser.add_argument('--fast', action='store_true', help='Fast test (5 epochs)')
     parser.add_argument('--medium', action='store_true', help='Medium training (30 epochs)')
     parser.add_argument('--epochs', type=int, default=None, help='Custom epochs')
+    parser.add_argument('--max_pairs', type=int, default=None, 
+                        help='Limit number of image pairs (e.g., 1000)')
     
     # Output
     parser.add_argument('--output', type=str, default='./watermark_model',
@@ -78,12 +80,18 @@ def main():
     --freeze_encoder_epochs {min(10, epochs // 3)} \\
     --vis_every {max(1, epochs // 10)}"""
     
+    # Add max_pairs if specified
+    if args.max_pairs:
+        cmd += f" \\\n    --max_pairs {args.max_pairs}"
+    
     print("="*60)
     print("WATERMARK GAN - QUICK TRAIN")
     print("="*60)
     print(f"\nClean images: {clean_dir}")
     print(f"Watermarked images: {wm_dir}")
     print(f"Epochs: {epochs}")
+    if args.max_pairs:
+        print(f"Max pairs: {args.max_pairs}")
     print(f"Output: {args.output}")
     print("\nRunning command:")
     print(cmd)
