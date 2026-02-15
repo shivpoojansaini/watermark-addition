@@ -18,15 +18,18 @@ import random
 from pathlib import Path
 from tqdm import tqdm
 import cv2
+import numpy as np
 
 
-def add_uoa_watermark(image, position=None):
+def add_uoa_watermark(image, position=None, opacity=0.5):
     """
-    Add "UOA" text watermark to one of 4 corners.
+    Add semi-transparent "UOA" watermark to one of 4 corners.
+    Only the watermark text is blended, rest of image unchanged.
 
     Args:
         image: Input image (BGR)
         position: 'top-left', 'top-right', 'bottom-left', 'bottom-right' or None (random)
+        opacity: Watermark opacity (0.0 = invisible, 1.0 = solid)
 
     Returns:
         Watermarked image
@@ -34,14 +37,17 @@ def add_uoa_watermark(image, position=None):
     h, w = image.shape[:2]
     result = image.copy()
 
+    # Create transparent overlay (black background)
+    overlay = np.zeros_like(image, dtype=np.uint8)
+
     # Watermark settings
     text = "UOA"
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 1.5
-    thickness = 3
+    font_scale = 2.0  # Larger text
+    thickness = 4
     color = (255, 255, 255)  # White
-    shadow_color = (0, 0, 0)  # Black shadow
-    padding = 20
+    shadow_color = (80, 80, 80)  # Gray shadow
+    padding = 25
 
     # Get text size
     (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
@@ -71,11 +77,24 @@ def add_uoa_watermark(image, position=None):
     x = max(0, min(x, w - text_w))
     y = max(text_h, min(y, h))
 
-    # Draw shadow (offset by 2 pixels)
-    cv2.putText(result, text, (x + 2, y + 2), font, font_scale, shadow_color, thickness + 2)
+    # Draw shadow on overlay (offset by 2 pixels)
+    cv2.putText(overlay, text, (x + 2, y + 2), font, font_scale, shadow_color, thickness + 2)
 
-    # Draw main text
-    cv2.putText(result, text, (x, y), font, font_scale, color, thickness)
+    # Draw main text on overlay
+    cv2.putText(overlay, text, (x, y), font, font_scale, color, thickness)
+
+    # Create mask where overlay has content (non-zero pixels)
+    gray = cv2.cvtColor(overlay, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+
+    # Blend only where mask is active (watermark area)
+    # watermark_region = original * (1 - opacity) + overlay * opacity
+    for c in range(3):
+        result[:, :, c] = np.where(
+            mask > 0,
+            (image[:, :, c] * (1 - opacity) + overlay[:, :, c] * opacity).astype(np.uint8),
+            image[:, :, c]
+        )
 
     return result
 
