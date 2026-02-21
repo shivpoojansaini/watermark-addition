@@ -2,11 +2,9 @@
 Inference script for Watermark Injection Model
 
 Usage:
-    python inference.py --model full_model.pth --input image.jpg --output watermarked.jpg
-    python inference.py --model full_model.pth --input image.jpg  # auto-generates output name
+    python inference.py
 """
 
-import argparse
 import random
 from pathlib import Path
 from typing import Tuple, Dict
@@ -17,6 +15,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+
+
+# ============================================================================
+# Configuration - SET THESE VALUES
+# ============================================================================
+
+MODEL_PATH = "output_injection_512/full_model.pth"  # Path to full model
+INPUT_IMAGE = "test.jpg"                             # Input image path
+OUTPUT_IMAGE = None                                  # Output path (None = auto-generate)
+CORNER = None                                        # 'top-left', 'top-right', 'bottom-left', 'bottom-right', or None for random
 
 
 # ============================================================================
@@ -214,18 +222,7 @@ def load_model(model_path, device):
 
 
 def add_watermark(image_path, model, device, corner):
-    """
-    Add watermark to a single image.
-
-    Args:
-        image_path: Path to input image
-        model: Loaded WatermarkInjectionNetwork model
-        device: torch device
-        corner: Which corner to place watermark
-
-    Returns:
-        watermarked_image: Watermarked image (BGR, uint8)
-    """
+    """Add watermark to a single image."""
     # Read image
     img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if img is None:
@@ -235,7 +232,7 @@ def add_watermark(image_path, model, device, corner):
 
     # Get model's expected image size from template buffer
     template = model.template_bottom_right
-    image_size = template.shape[1]  # Template shape is [3, H, W]
+    image_size = template.shape[1]
 
     # Preprocess
     img_resized = cv2.resize(img, (image_size, image_size))
@@ -252,8 +249,8 @@ def add_watermark(image_path, model, device, corner):
 
     # Post-process
     watermarked = output.squeeze(0).cpu().numpy()
-    watermarked = np.transpose(watermarked, (1, 2, 0))  # CHW to HWC
-    watermarked = watermarked[:, :, ::-1]  # RGB to BGR
+    watermarked = np.transpose(watermarked, (1, 2, 0))
+    watermarked = watermarked[:, :, ::-1]
     watermarked = np.clip(watermarked * 255, 0, 255).astype(np.uint8)
 
     # Resize back to original dimensions
@@ -263,18 +260,6 @@ def add_watermark(image_path, model, device, corner):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Add watermark to image using trained model')
-    parser.add_argument('--model', type=str, required=True,
-                        help='Path to full model (.pth file)')
-    parser.add_argument('--input', type=str, required=True,
-                        help='Input image path')
-    parser.add_argument('--output', type=str, default=None,
-                        help='Output image path (optional, auto-generated if not provided)')
-    parser.add_argument('--corner', type=str, default=None, choices=CORNERS,
-                        help='Corner for watermark (default: random)')
-
-    args = parser.parse_args()
-
     # Setup device
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -284,24 +269,21 @@ def main():
         print("Using CPU")
 
     # Load model
-    model = load_model(args.model, device)
+    model = load_model(MODEL_PATH, device)
 
     # Select corner (random if not specified)
-    if args.corner:
-        corner = args.corner
-    else:
-        corner = random.choice(CORNERS)
+    corner = CORNER if CORNER else random.choice(CORNERS)
     print(f"Using corner: {corner}")
 
     # Process image
-    input_path = Path(args.input)
+    input_path = Path(INPUT_IMAGE)
     if not input_path.exists():
         print(f"Error: Input file not found: {input_path}")
         return
 
     # Generate output path if not provided
-    if args.output:
-        output_path = Path(args.output)
+    if OUTPUT_IMAGE:
+        output_path = Path(OUTPUT_IMAGE)
     else:
         corner_suffix = corner.replace('-', '_')
         output_path = input_path.parent / f"{input_path.stem}_watermarked_{corner_suffix}{input_path.suffix}"
